@@ -14,16 +14,32 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
+     * The billable table from the configured model (e.g. users, tenants).
+     */
+    protected function billableTable(): string
+    {
+        $model = config('pelecard.model', 'App\\Models\\User');
+
+        if (is_string($model) && class_exists($model)) {
+            return (new $model)->getTable();
+        }
+
+        return 'users';
+    }
+
+    /**
      * Run the migrations.
      */
     public function up(): void
     {
-        if (Schema::hasTable('users')) {
-            Schema::table('users', function (Blueprint $table): void {
-                if (Schema::hasColumn('users', 'pelecard_id') && ! Schema::hasColumn('users', 'pelecard_token')) {
+        $billableTable = $this->billableTable();
+
+        if (Schema::hasTable($billableTable)) {
+            Schema::table($billableTable, function (Blueprint $table) use ($billableTable): void {
+                if (Schema::hasColumn($billableTable, 'pelecard_id') && ! Schema::hasColumn($billableTable, 'pelecard_token')) {
                     $table->string('pelecard_token')->nullable()->after('pelecard_id');
                 }
-                if (Schema::hasColumn('users', 'pm_last_four') && ! Schema::hasColumn('users', 'pm_exp_month')) {
+                if (Schema::hasColumn($billableTable, 'pm_last_four') && ! Schema::hasColumn($billableTable, 'pm_exp_month')) {
                     $table->string('pm_exp_month', 2)->nullable()->after('pm_last_four');
                     $table->string('pm_exp_year', 4)->nullable()->after('pm_exp_month');
                 }
@@ -61,6 +77,8 @@ return new class extends Migration
      */
     public function down(): void
     {
+        $billableTable = $this->billableTable();
+
         if (Schema::hasTable('subscription_items')) {
             Schema::table('subscription_items', function (Blueprint $table): void {
                 if (Schema::hasColumn('subscription_items', 'pelecard_product')) {
@@ -86,10 +104,10 @@ return new class extends Migration
             });
         }
 
-        if (Schema::hasTable('users')) {
-            Schema::table('users', function (Blueprint $table): void {
+        if (Schema::hasTable($billableTable)) {
+            Schema::table($billableTable, function (Blueprint $table) use ($billableTable): void {
                 foreach (['pelecard_token', 'pm_exp_month', 'pm_exp_year'] as $column) {
-                    if (Schema::hasColumn('users', $column)) {
+                    if (Schema::hasColumn($billableTable, $column)) {
                         $table->dropColumn($column);
                     }
                 }

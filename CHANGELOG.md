@@ -2,6 +2,13 @@
 
 All notable changes to `laravel-pelecard` will be documented in this file.
 
+## v2.1.0 - 2026-06-23
+
+### Added
+- **Configurable billable model.** The model that owns subscriptions, transactions and the saved card token is now set via `config('pelecard.model')` (default `App\Models\User`), so the package can bill a `Tenant`, `Team`, or any other model — not just `users`.
+  - `Subscription` and `PelecardTransaction` gained an `owner()` relationship (with `user()` kept as a deprecated alias) that resolves the configured model and its foreign key, mirroring Laravel Cashier's `owner()` / `getForeignKey()` pattern.
+  - The package migrations now derive the billable **table and foreign key from the configured model** (e.g. `tenants` / `tenant_id`), so no migration editing is required to bill a non-User model. With the default `App\Models\User` the schema is unchanged (`users` / `user_id`), so this is backward-compatible.
+
 ## v2.0.0 - 2026-06-23
 
 This release brings the package up to date with current Laravel and Laravel

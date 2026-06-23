@@ -7,13 +7,34 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
+     * Resolve the billable table and foreign key from the configured model
+     * (e.g. ['users', 'user_id'] or ['tenants', 'tenant_id']).
+     *
+     * @return array{0: string, 1: string}
+     */
+    protected function billable(): array
+    {
+        $model = config('pelecard.model', 'App\\Models\\User');
+
+        if (is_string($model) && class_exists($model)) {
+            $instance = new $model;
+
+            return [$instance->getTable(), $instance->getForeignKey()];
+        }
+
+        return ['users', 'user_id'];
+    }
+
+    /**
      * Run the migrations.
      */
     public function up(): void
     {
-        // Add Pelecard columns to users table
-        if (! Schema::hasColumn('users', 'pelecard_id')) {
-            Schema::table('users', function (Blueprint $table) {
+        [$billableTable, $foreignKey] = $this->billable();
+
+        // Add Pelecard columns to the billable table
+        if (! Schema::hasColumn($billableTable, 'pelecard_id')) {
+            Schema::table($billableTable, function (Blueprint $table) {
                 $table->string('pelecard_id')->nullable()->index();
                 $table->string('pelecard_token')->nullable(); // default payment method (card token)
                 $table->string('pm_type')->nullable(); // card brand, e.g. "visa"
@@ -39,9 +60,9 @@ return new class extends Migration
         });
 
         // Create subscriptions table
-        Schema::create('subscriptions', function (Blueprint $table) {
+        Schema::create('subscriptions', function (Blueprint $table) use ($billableTable, $foreignKey) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId($foreignKey)->constrained($billableTable)->cascadeOnDelete();
             $table->string('type'); // subscription type (e.g., 'default', 'premium')
             $table->string('pelecard_subscription_id')->nullable();
             $table->string('pelecard_status')->nullable(); // active, trialing, canceled, past_due, incomplete
@@ -51,7 +72,7 @@ return new class extends Migration
             $table->timestamp('ends_at')->nullable(); // cancellation date
             $table->timestamps();
 
-            $table->index(['user_id', 'type']);
+            $table->index([$foreignKey, 'type']);
         });
 
         // Create subscription_items table
@@ -67,9 +88,9 @@ return new class extends Migration
         });
 
         // Create pelecard_transactions table for logging
-        Schema::create('pelecard_transactions', function (Blueprint $table) {
+        Schema::create('pelecard_transactions', function (Blueprint $table) use ($billableTable, $foreignKey) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId($foreignKey)->constrained($billableTable)->cascadeOnDelete();
             $table->string('pelecard_transaction_id')->nullable()->index();
             $table->string('type'); // charge, refund, authorize, etc.
             $table->integer('amount'); // in agorot/cents
@@ -78,8 +99,8 @@ return new class extends Migration
             $table->json('metadata')->nullable(); // full API response
             $table->timestamps();
 
-            $table->index(['user_id', 'type']);
-            $table->index(['user_id', 'status']);
+            $table->index([$foreignKey, 'type']);
+            $table->index([$foreignKey, 'status']);
         });
     }
 
@@ -88,13 +109,15 @@ return new class extends Migration
      */
     public function down(): void
     {
+        [$billableTable] = $this->billable();
+
         Schema::dropIfExists('pelecard_transactions');
         Schema::dropIfExists('subscription_items');
         Schema::dropIfExists('subscriptions');
         Schema::dropIfExists('pelecard_credentials');
 
-        if (Schema::hasColumn('users', 'pelecard_id')) {
-            Schema::table('users', function (Blueprint $table) {
+        if (Schema::hasColumn($billableTable, 'pelecard_id')) {
+            Schema::table($billableTable, function (Blueprint $table) use ($billableTable) {
                 // Drop the index before the column it references; otherwise
                 // SQLite (and stricter drivers) error on the dangling index.
                 $table->dropIndex(['pelecard_id']);
@@ -109,7 +132,7 @@ return new class extends Migration
                     'pm_exp_month',
                     'pm_exp_year',
                     'trial_ends_at',
-                ], fn (string $column): bool => Schema::hasColumn('users', $column));
+                ], fn (string $column): bool => Schema::hasColumn($billableTable, $column));
 
                 $table->dropColumn($columns);
             });

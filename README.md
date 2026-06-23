@@ -58,9 +58,27 @@ PELECARD_PASSWORD=your_api_password
 PELECARD_ENV=sandbox  # or 'production'
 ```
 
+### Billable Model
+
+By default the billable entity — the model that owns subscriptions,
+transactions and the saved card token — is your `App\Models\User`. To bill a
+different model (e.g. a `Tenant` or `Team` in a SaaS app), set it in
+`config/pelecard.php` (or the `PELECARD_MODEL` env var):
+
+```php
+'model' => env('PELECARD_MODEL', App\Models\Tenant::class),
+```
+
+The model's table and foreign key drive both the migration and the
+relationships, so a `Tenant` model (table `tenants`) automatically uses a
+`tenant_id` foreign key on the `subscriptions` and `pelecard_transactions`
+tables — no migration editing required. Just add the `Billable` trait to that
+model. (This mirrors Laravel Cashier's configurable customer model.)
+
 ### Multi-Tenancy Configuration
 
-For multi-tenant applications, enable multi-tenancy in `config/pelecard.php`:
+For applications that need **separate Pelecard credentials per tenant**, enable
+multi-tenancy in `config/pelecard.php`:
 
 ```php
 'multi_tenant' => true,
@@ -70,12 +88,21 @@ For multi-tenant applications, enable multi-tenancy in `config/pelecard.php`:
 
 ### Basic Setup
 
-Add the `Billable` trait to your User model:
+Add the `Billable` trait to your billable model (your `User`, or whatever
+`pelecard.model` points at):
 
 ```php
 use Yousefkadah\Pelecard\Billable;
 
 class User extends Authenticatable
+{
+    use Billable;
+}
+```
+
+```php
+// Or a tenant / team, when pelecard.model is set to it
+class Tenant extends Model
 {
     use Billable;
 }

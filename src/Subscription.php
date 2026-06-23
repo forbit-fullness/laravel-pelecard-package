@@ -40,7 +40,6 @@ class Subscription extends Model
     protected $table = 'subscriptions';
 
     protected $fillable = [
-        'user_id',
         'type',
         'pelecard_subscription_id',
         'pelecard_status',
@@ -50,6 +49,36 @@ class Subscription extends Model
         'ends_at',
     ];
 
+    /**
+     * Get the mass-assignable attributes, including the billable foreign key.
+     *
+     * @return array<int, string>
+     */
+    public function getFillable(): array
+    {
+        return array_merge([$this->billableForeignKey()], $this->fillable);
+    }
+
+    /**
+     * The configured billable model class.
+     *
+     * @return class-string<Model>
+     */
+    public static function billableModel(): string
+    {
+        return config('pelecard.model', 'App\\Models\\User');
+    }
+
+    /**
+     * The foreign key column for the billable owner (e.g. user_id, tenant_id).
+     */
+    public function billableForeignKey(): string
+    {
+        $model = static::billableModel();
+
+        return (new $model)->getForeignKey();
+    }
+
     protected $casts = [
         'quantity' => 'integer',
         'trial_ends_at' => 'datetime',
@@ -57,11 +86,23 @@ class Subscription extends Model
     ];
 
     /**
-     * Get the user that owns the subscription.
+     * Get the billable owner of the subscription (user, tenant, team, ...).
+     */
+    public function owner(): BelongsTo
+    {
+        $model = static::billableModel();
+
+        return $this->belongsTo($model, (new $model)->getForeignKey());
+    }
+
+    /**
+     * Get the owner of the subscription.
+     *
+     * @deprecated Use owner() — kept for backward compatibility.
      */
     public function user(): BelongsTo
     {
-        return $this->belongsTo(config('auth.providers.users.model', 'App\\Models\\User'));
+        return $this->owner();
     }
 
     /**

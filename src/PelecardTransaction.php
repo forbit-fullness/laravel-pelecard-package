@@ -23,7 +23,6 @@ class PelecardTransaction extends Model
     protected $table = 'pelecard_transactions';
 
     protected $fillable = [
-        'user_id',
         'pelecard_transaction_id',
         'type',
         'amount',
@@ -38,11 +37,35 @@ class PelecardTransaction extends Model
     ];
 
     /**
-     * Get the user that owns the transaction.
+     * Get the mass-assignable attributes, including the billable foreign key.
+     *
+     * @return array<int, string>
+     */
+    public function getFillable(): array
+    {
+        $model = config('pelecard.model', 'App\\Models\\User');
+
+        return array_merge([(new $model)->getForeignKey()], $this->fillable);
+    }
+
+    /**
+     * Get the billable owner of the transaction (user, tenant, team, ...).
+     */
+    public function owner(): BelongsTo
+    {
+        $model = config('pelecard.model', 'App\\Models\\User');
+
+        return $this->belongsTo($model, (new $model)->getForeignKey());
+    }
+
+    /**
+     * Get the owner of the transaction.
+     *
+     * @deprecated Use owner() — kept for backward compatibility.
      */
     public function user(): BelongsTo
     {
-        return $this->belongsTo(config('auth.providers.users.model', 'App\\Models\\User'));
+        return $this->owner();
     }
 
     /**

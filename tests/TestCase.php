@@ -6,6 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 use Yousefkadah\Pelecard\PelecardServiceProvider;
+use Yousefkadah\Pelecard\Tests\Fixtures\User;
 
 abstract class TestCase extends Orchestra
 {
@@ -45,6 +46,7 @@ abstract class TestCase extends Orchestra
         ]);
 
         // Setup Pelecard config
+        $app['config']->set('pelecard.model', User::class);
         $app['config']->set('pelecard.terminal', 'test_terminal');
         $app['config']->set('pelecard.user', 'test_user');
         $app['config']->set('pelecard.password', 'test_password');

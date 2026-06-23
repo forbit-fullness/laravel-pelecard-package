@@ -4,6 +4,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Billable Model
+    |--------------------------------------------------------------------------
+    |
+    | The Eloquent model that owns subscriptions, transactions and the saved
+    | card token (i.e. the model that uses the Billable trait). Defaults to the
+    | application's User model, but may point at any model — e.g. a Tenant or
+    | Team for SaaS billing. The model's table and foreign key (via
+    | getTable()/getForeignKey()) drive the package migration and relationships,
+    | so a Tenant model with table "tenants" yields a "tenant_id" foreign key.
+    |
+    */
+
+    'model' => env('PELECARD_MODEL', 'App\\Models\\User'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Multi-Tenancy Configuration
     |--------------------------------------------------------------------------
     |

@@ -30,6 +30,11 @@ class SubscriptionTest extends TestCase
         $this->assertFalse($user->subscribed('default', 'other_price'));
         $this->assertTrue($subscription->active());
         $this->assertFalse($subscription->onTrial());
+
+        // The subscription resolves its owner via the configured billable model.
+        $this->assertTrue($subscription->owner()->is($user));
+        $this->assertTrue($subscription->user()->is($user));
+        $this->assertSame('user_id', $subscription->billableForeignKey());
     }
 
     #[Test]
