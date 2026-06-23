@@ -19,6 +19,20 @@ class IframeHelper
     public function __construct(protected PelecardClient $client) {}
 
     /**
+     * Convert an ISO currency code (e.g. "ILS") to Pelecard's numeric code.
+     */
+    protected function currencyCode(int|string $currency): int|string
+    {
+        if (is_int($currency) || is_numeric($currency)) {
+            return $currency;
+        }
+
+        $codes = (array) config('pelecard.currency_codes', []);
+
+        return $codes[strtoupper($currency)] ?? $currency;
+    }
+
+    /**
      * Generate iframe URL for payment page.
      */
     public function generatePaymentUrl(array $data): string
@@ -32,14 +46,14 @@ class IframeHelper
             'password' => $this->client->getPassword(),
             'shopNo' => $data['shop_number'] ?? config('pelecard.shop_number', '001'), // Sandbox label is ShopNo
             'total' => $data['amount'],
-            'currency' => $data['currency'] ?? config('pelecard.currency', 'ILS'),
+            'currency' => $this->currencyCode($data['currency'] ?? config('pelecard.currency', 'ILS')),
             'goodUrl' => $data['success_url'] ?? '',
             'errorUrl' => $data['error_url'] ?? '',
             'cancelUrl' => $data['cancel_url'] ?? '',
             'lang' => $data['language'] ?? 'he',
             'paramX' => $data['param_x'] ?? '',
             // Additional Sandbox params
-            'actionType' => $data['action_type'] ?? self::ACTION_TYPE_REGISTRY, // Default to J2 (Registry)
+            'actionType' => $data['action_type'] ?? self::ACTION_TYPE_PAYMENT, // Default to J4 (Debit/Payment)
             'authNum' => $data['auth_num'] ?? '',
             'firstPayment' => $data['first_payment'] ?? '',
             'firstPaymentLock' => isset($data['first_payment_lock']) ? ($data['first_payment_lock'] ? '1' : '0') : '',
@@ -188,7 +202,7 @@ class IframeHelper
             'terminal' => $this->client->getTerminal(),
             'user' => $data['user'] ?? '',
             'total' => $data['amount'],
-            'currency' => $data['currency'] ?? config('pelecard.currency', 'ILS'),
+            'currency' => $this->currencyCode($data['currency'] ?? config('pelecard.currency', 'ILS')),
             'lang' => $data['language'] ?? config('pelecard.language', 'he'),
             'ParamX' => $data['param_x'] ?? '',
             'GoodUrl' => $data['success_url'] ?? route('pelecard.success'),

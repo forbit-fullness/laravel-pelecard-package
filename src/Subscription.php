@@ -3,6 +3,7 @@
 namespace Yousefkadah\Pelecard;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,24 +11,40 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * @property int $id
  * @property int $user_id
- * @property string $name
- * @property string $pelecard_subscription_id
- * @property string $pelecard_plan
- * @property int $quantity
- * @property \Carbon\Carbon|null $trial_ends_at
- * @property \Carbon\Carbon|null $ends_at
- * @property \Carbon\Carbon|null $created_at
- * @property \Carbon\Carbon|null $updated_at
+ * @property string $type
+ * @property string|null $pelecard_subscription_id
+ * @property string|null $pelecard_status
+ * @property string|null $pelecard_price
+ * @property int|null $quantity
+ * @property Carbon|null $trial_ends_at
+ * @property Carbon|null $ends_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property Collection<int, SubscriptionItem> $items
  */
 class Subscription extends Model
 {
+    /**
+     * Subscription status values (mirrors Cashier's Stripe statuses).
+     */
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_TRIALING = 'trialing';
+
+    public const STATUS_CANCELED = 'canceled';
+
+    public const STATUS_PAST_DUE = 'past_due';
+
+    public const STATUS_INCOMPLETE = 'incomplete';
+
     protected $table = 'subscriptions';
 
     protected $fillable = [
         'user_id',
-        'name',
+        'type',
         'pelecard_subscription_id',
-        'pelecard_plan',
+        'pelecard_status',
+        'pelecard_price',
         'quantity',
         'trial_ends_at',
         'ends_at',
@@ -56,39 +73,106 @@ class Subscription extends Model
     }
 
     /**
+     * Find an item for the given price, or fail.
+     */
+    public function findItemOrFail(string $price): SubscriptionItem
+    {
+        return SubscriptionItem::query()
+            ->where('subscription_id', $this->getKey())
+            ->where('pelecard_price', $price)
+            ->firstOrFail();
+    }
+
+    /**
+     * Determine if the subscription has multiple prices (items).
+     */
+    public function hasMultiplePrices(): bool
+    {
+        return is_null($this->pelecard_price);
+    }
+
+    /**
+     * Determine if the subscription has a single price.
+     */
+    public function hasSinglePrice(): bool
+    {
+        return ! $this->hasMultiplePrices();
+    }
+
+    /**
      * Check if the subscription is active.
      */
     public function active(): bool
     {
-        return $this->valid();
+        return (! $this->canceled() || $this->onGracePeriod())
+            && ! $this->pastDue()
+            && ! $this->incomplete();
     }
 
     /**
-     * Check if the subscription is valid.
+     * Check if the subscription is valid (active, on trial, or on grace period).
      */
     public function valid(): bool
     {
-        if ($this->onTrial()) {
-            return true;
-        }
-
-        return $this->recurring() && ! $this->cancelled();
+        return $this->active() || $this->onTrial() || $this->onGracePeriod();
     }
 
     /**
-     * Check if the subscription is recurring.
+     * Check if the subscription is recurring and not on trial.
      */
     public function recurring(): bool
     {
-        return ! $this->onTrial() && ! $this->cancelled();
+        return ! $this->onTrial() && ! $this->canceled();
     }
 
     /**
-     * Check if the subscription is cancelled.
+     * Check if the subscription is canceled.
+     */
+    public function canceled(): bool
+    {
+        return ! is_null($this->ends_at);
+    }
+
+    /**
+     * Check if the subscription is canceled.
+     *
+     * @deprecated Use canceled() to match Laravel Cashier. Kept for backward compatibility.
      */
     public function cancelled(): bool
     {
-        return ! is_null($this->ends_at);
+        return $this->canceled();
+    }
+
+    /**
+     * Check if the subscription has ended (canceled and grace period elapsed).
+     */
+    public function ended(): bool
+    {
+        return $this->canceled() && ! $this->onGracePeriod();
+    }
+
+    /**
+     * Check if the subscription is past due.
+     */
+    public function pastDue(): bool
+    {
+        return $this->pelecard_status === self::STATUS_PAST_DUE;
+    }
+
+    /**
+     * Check if the subscription is incomplete.
+     */
+    public function incomplete(): bool
+    {
+        return $this->pelecard_status === self::STATUS_INCOMPLETE;
+    }
+
+    /**
+     * Check if the subscription has an incomplete or past-due payment.
+     */
+    public function hasIncompletePayment(): bool
+    {
+        return $this->pastDue() || $this->incomplete();
     }
 
     /**
@@ -108,11 +192,33 @@ class Subscription extends Model
     }
 
     /**
-     * Check if the subscription has a specific plan.
+     * Check if the subscription is for the given price.
+     */
+    public function hasPrice(string $price): bool
+    {
+        if ($this->hasMultiplePrices()) {
+            return $this->items->contains('pelecard_price', $price);
+        }
+
+        return $this->pelecard_price === $price;
+    }
+
+    /**
+     * Check if the subscription is for the given product.
+     */
+    public function hasProduct(string $product): bool
+    {
+        return $this->items->contains('pelecard_product', $product);
+    }
+
+    /**
+     * Check if the subscription has the given price.
+     *
+     * @deprecated Use hasPrice() to match Laravel Cashier. Kept for backward compatibility.
      */
     public function hasPlan(string $plan): bool
     {
-        return $this->pelecard_plan === $plan;
+        return $this->hasPrice($plan);
     }
 
     /**
@@ -123,6 +229,8 @@ class Subscription extends Model
         $this->ends_at = $this->onTrial()
             ? $this->trial_ends_at
             : Carbon::now()->addMonth();
+
+        $this->pelecard_status = self::STATUS_CANCELED;
 
         $this->save();
 
@@ -137,6 +245,7 @@ class Subscription extends Model
     public function cancelNow(): static
     {
         $this->ends_at = Carbon::now();
+        $this->pelecard_status = self::STATUS_CANCELED;
         $this->save();
 
         event(new Events\SubscriptionCancelled($this));
@@ -145,7 +254,21 @@ class Subscription extends Model
     }
 
     /**
-     * Resume a cancelled subscription.
+     * Cancel the subscription at a specific moment in time.
+     */
+    public function cancelAt(Carbon $endsAt): static
+    {
+        $this->ends_at = $endsAt;
+        $this->pelecard_status = self::STATUS_CANCELED;
+        $this->save();
+
+        event(new Events\SubscriptionCancelled($this));
+
+        return $this;
+    }
+
+    /**
+     * Resume a canceled subscription.
      */
     public function resume(): static
     {
@@ -154,6 +277,7 @@ class Subscription extends Model
         }
 
         $this->ends_at = null;
+        $this->pelecard_status = self::STATUS_ACTIVE;
         $this->save();
 
         event(new Events\SubscriptionUpdated($this));
@@ -162,26 +286,56 @@ class Subscription extends Model
     }
 
     /**
-     * Swap the subscription to a new plan.
+     * Swap the subscription to new price(s).
+     *
+     * @param  string|array<int, string>  $prices
      */
-    public function swap(string $plan): static
+    public function swap(string|array $prices): static
     {
-        $oldPlan = $this->pelecard_plan;
+        $oldPrice = $this->pelecard_price;
+        $prices = (array) $prices;
 
-        $this->pelecard_plan = $plan;
+        if (count($prices) === 1) {
+            $this->pelecard_price = $prices[0];
+            $this->items()->delete();
+        } else {
+            $this->pelecard_price = null;
+
+            $this->items()->whereNotIn('pelecard_price', $prices)->delete();
+
+            foreach ($prices as $price) {
+                $this->items()->updateOrCreate(
+                    ['pelecard_price' => $price],
+                    ['quantity' => $this->quantity ?? 1],
+                );
+            }
+        }
+
         $this->save();
 
-        event(new Events\SubscriptionUpdated($this, $oldPlan));
+        event(new Events\SubscriptionUpdated($this, $oldPrice));
 
         return $this;
     }
 
     /**
-     * Swap the subscription to a new plan without proration.
+     * Swap the subscription to new price(s) and invoice immediately.
+     *
+     * @param  string|array<int, string>  $prices
      */
-    public function swapWithoutProration(string $plan): static
+    public function swapAndInvoice(string|array $prices): static
     {
-        return $this->noProrate()->swap($plan);
+        return $this->swap($prices);
+    }
+
+    /**
+     * Swap the subscription to new price(s) without proration.
+     *
+     * @param  string|array<int, string>  $prices
+     */
+    public function swapWithoutProration(string|array $prices): static
+    {
+        return $this->noProrate()->swap($prices);
     }
 
     /**
@@ -189,7 +343,7 @@ class Subscription extends Model
      */
     public function incrementQuantity(int $count = 1): static
     {
-        return $this->updateQuantity($this->quantity + $count);
+        return $this->updateQuantity(($this->quantity ?? 1) + $count);
     }
 
     /**
@@ -197,7 +351,7 @@ class Subscription extends Model
      */
     public function decrementQuantity(int $count = 1): static
     {
-        return $this->updateQuantity(max(1, $this->quantity - $count));
+        return $this->updateQuantity(max(1, ($this->quantity ?? 1) - $count));
     }
 
     /**
@@ -218,8 +372,8 @@ class Subscription extends Model
      */
     public function noProrate(): static
     {
-        // This would be used to prevent proration on next swap
-        // Implementation depends on Pelecard's proration support
+        // This would be used to prevent proration on next swap.
+        // Implementation depends on Pelecard's proration support.
         return $this;
     }
 
@@ -246,11 +400,21 @@ class Subscription extends Model
     }
 
     /**
-     * Scope to get cancelled subscriptions.
+     * Scope to get canceled subscriptions.
+     */
+    public function scopeCanceled($query)
+    {
+        return $query->whereNotNull('ends_at');
+    }
+
+    /**
+     * Scope to get canceled subscriptions.
+     *
+     * @deprecated Use scopeCanceled() to match Laravel Cashier. Kept for backward compatibility.
      */
     public function scopeCancelled($query)
     {
-        return $query->whereNotNull('ends_at');
+        return $this->scopeCanceled($query);
     }
 
     /**

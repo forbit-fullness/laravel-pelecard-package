@@ -2,16 +2,18 @@
 
 namespace Yousefkadah\Pelecard;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * @property int $id
  * @property int $subscription_id
- * @property string $pelecard_plan
+ * @property string|null $pelecard_product
+ * @property string $pelecard_price
  * @property int $quantity
- * @property \Carbon\Carbon|null $created_at
- * @property \Carbon\Carbon|null $updated_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class SubscriptionItem extends Model
 {
@@ -19,7 +21,8 @@ class SubscriptionItem extends Model
 
     protected $fillable = [
         'subscription_id',
-        'pelecard_plan',
+        'pelecard_product',
+        'pelecard_price',
         'quantity',
     ];
 
@@ -33,6 +36,14 @@ class SubscriptionItem extends Model
     public function subscription(): BelongsTo
     {
         return $this->belongsTo(Subscription::class);
+    }
+
+    /**
+     * Determine if the item is for the given price.
+     */
+    public function hasPrice(string $price): bool
+    {
+        return $this->pelecard_price === $price;
     }
 
     /**

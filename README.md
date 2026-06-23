@@ -23,8 +23,8 @@ A comprehensive Laravel package for integrating with the Pelecard payment gatewa
 
 ## Requirements
 
-- PHP 8.1 or higher
-- Laravel 10.x, 11.x, or 12.x
+- PHP 8.1 or higher (PHP 8.3+ recommended for Laravel 13)
+- Laravel 10.x, 11.x, 12.x, or 13.x
 - Pelecard merchant account
 
 ## Installation
@@ -170,8 +170,12 @@ $transactionId = $response->getTransactionId();
 
 #### Capture Authorization
 
+Pelecard has no dedicated capture service — capturing a held (J5) authorization
+is done by charging the saved token with `ActionType` J4:
+
 ```php
-Pelecard::capture($transactionId, 5000);
+// Pass the token saved from the authorization response
+Pelecard::capture($token, 5000);
 ```
 
 #### Refund a Transaction
@@ -611,11 +615,20 @@ $formHtml = $iframeHelper->generatePaymentForm([
 
 ### Subscriptions
 
+The subscription API follows current Laravel Cashier conventions: subscriptions
+have a **type** (e.g. `'default'`) and one or more **prices**.
+
 #### Create a Subscription
 
 ```php
-$user->newSubscription('default', 'plan_123')
+// Single price
+$user->newSubscription('default', 'price_monthly')
     ->trialDays(14)
+    ->create($paymentMethod);
+
+// Multiple prices (stored in subscription_items)
+$user->newSubscription('default', ['price_seat', 'price_addon'])
+    ->quantity(3, 'price_seat')
     ->create($paymentMethod);
 ```
 
@@ -623,34 +636,56 @@ $user->newSubscription('default', 'plan_123')
 
 ```php
 if ($user->subscribed('default')) {
-    // User has an active subscription
+    // User has a valid subscription (active, on trial, or on grace period)
 }
+
+// Subscribed to a specific price or product
+$user->subscribed('default', 'price_monthly');
+$user->subscribedToPrice('price_monthly', 'default');
+$user->subscribedToProduct('prod_premium', 'default');
 
 if ($user->onTrial('default')) {
     // User is on trial
 }
+
+// Payment state
+$user->hasIncompletePayment('default');
+
+$subscription = $user->subscription('default');
+$subscription->active();
+$subscription->canceled();
+$subscription->onGracePeriod();
+$subscription->ended();
+$subscription->pastDue();
 ```
 
 #### Cancel a Subscription
 
 ```php
-// Cancel at end of billing period
+// Cancel at end of billing period (enters grace period)
 $user->subscription('default')->cancel();
 
 // Cancel immediately
 $user->subscription('default')->cancelNow();
+
+// Cancel at a specific time
+$user->subscription('default')->cancelAt(now()->addDays(10));
 ```
 
-#### Resume a Cancelled Subscription
+#### Resume a Canceled Subscription
 
 ```php
 $user->subscription('default')->resume();
 ```
 
-#### Swap Plans
+#### Swap Prices
 
 ```php
-$user->subscription('default')->swap('plan_456');
+// Swap to a single price
+$user->subscription('default')->swap('price_yearly');
+
+// Swap to multiple prices
+$user->subscription('default')->swap(['price_yearly', 'price_addon']);
 ```
 
 #### Update Quantity

@@ -7,10 +7,16 @@ parameters:
         - src
     excludePaths:
         - vendor
-    checkMissingIterableValueType: false
-    checkGenericClassInNonGenericObjectType: false
     reportUnmatchedIgnoredErrors: false
     ignoreErrors:
         - '#Call to an undefined method Illuminate\\.*#'
         - '#Access to an undefined property Illuminate\\.*#'
         - '#Unsafe usage of new static#'
+        -
+            identifier: missingType.iterableValue
+        -
+            identifier: missingType.generics
+        # Billable / ManagesPelecardCredentials are consumed by the host
+        # application's models, so they are never used within this package.
+        -
+            identifier: trait.unused

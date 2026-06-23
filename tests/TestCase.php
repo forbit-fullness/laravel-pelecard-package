@@ -2,6 +2,8 @@
 
 namespace Yousefkadah\Pelecard\Tests;
 
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 use Yousefkadah\Pelecard\PelecardServiceProvider;
 
@@ -10,6 +12,17 @@ abstract class TestCase extends Orchestra
     protected function setUp(): void
     {
         parent::setUp();
+
+        // The package migration alters the host application's "users" table,
+        // so it must exist before the package migrations run.
+        if (! Schema::hasTable('users')) {
+            Schema::create('users', function (Blueprint $table): void {
+                $table->id();
+                $table->string('name');
+                $table->string('email')->unique();
+                $table->timestamps();
+            });
+        }
 
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
     }

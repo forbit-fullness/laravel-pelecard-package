@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Yousefkadah\Pelecard\Events\PaymentFailed;
 use Yousefkadah\Pelecard\Events\PaymentSucceeded;
+use Yousefkadah\Pelecard\Http\Response;
 
 class WebhookController extends Controller
 {
@@ -27,10 +28,10 @@ class WebhookController extends Controller
         // Dispatch appropriate event
         match ($eventType) {
             'payment.succeeded' => event(new PaymentSucceeded(
-                new \Yousefkadah\Pelecard\Http\Response($payload)
+                new Response($payload)
             )),
             'payment.failed' => event(new PaymentFailed(
-                new \Yousefkadah\Pelecard\Http\Response($payload)
+                new Response($payload)
             )),
             default => null,
         };

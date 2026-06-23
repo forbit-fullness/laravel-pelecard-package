@@ -2,6 +2,7 @@
 
 namespace Yousefkadah\Pelecard;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Cache;
 use Yousefkadah\Pelecard\Exceptions\AuthenticationException;
 
@@ -38,7 +39,7 @@ class CredentialsResolver
             $credentials = $billable->pelecardCredentials();
 
             // Handle relationship vs direct return
-            if ($credentials instanceof \Illuminate\Database\Eloquent\Relations\Relation) {
+            if ($credentials instanceof Relation) {
                 $credentials = $credentials->active()->first();
             }
 

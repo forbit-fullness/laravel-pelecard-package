@@ -14,5 +14,5 @@ class SubscriptionUpdated
     /**
      * Create a new event instance.
      */
-    public function __construct(public Subscription $subscription, public ?string $oldPlan = null) {}
+    public function __construct(public Subscription $subscription, public ?string $oldPrice = null) {}
 }

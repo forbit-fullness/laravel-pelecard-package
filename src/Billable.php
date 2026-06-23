@@ -3,8 +3,10 @@
 namespace Yousefkadah\Pelecard;
 
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Yousefkadah\Pelecard\Events\CardSaved;
 use Yousefkadah\Pelecard\Events\PaymentFailed;
 use Yousefkadah\Pelecard\Events\PaymentSucceeded;
+use Yousefkadah\Pelecard\Helpers\TokenExtractor;
 use Yousefkadah\Pelecard\Http\Response;
 
 trait Billable
@@ -18,39 +20,91 @@ trait Billable
     }
 
     /**
-     * Get a subscription by name.
+     * Get a subscription by type.
      */
-    public function subscription(string $name = 'default'): ?Subscription
+    public function subscription(string $type = 'default'): ?Subscription
     {
-        return $this->subscriptions()->where('name', $name)->first();
+        return $this->subscriptions()->where('type', $type)->first();
     }
 
     /**
-     * Check if the billable entity is subscribed to a plan.
+     * Check if the billable entity is subscribed to the given type (optionally to a price).
      */
-    public function subscribed(string $name = 'default', ?string $plan = null): bool
+    public function subscribed(string $type = 'default', ?string $price = null): bool
     {
-        $subscription = $this->subscription($name);
+        $subscription = $this->subscription($type);
 
         if (! $subscription || ! $subscription->valid()) {
             return false;
         }
 
-        if ($plan) {
-            return $subscription->hasPlan($plan);
+        if ($price) {
+            return $subscription->hasPrice($price);
         }
 
         return true;
     }
 
     /**
-     * Check if the billable entity is on trial.
+     * Check if the billable entity is subscribed to the given price(s).
+     *
+     * @param  string|array<int, string>  $prices
      */
-    public function onTrial(string $name = 'default'): bool
+    public function subscribedToPrice(string|array $prices, string $type = 'default'): bool
     {
-        $subscription = $this->subscription($name);
+        $subscription = $this->subscription($type);
 
-        return $subscription && $subscription->onTrial();
+        if (! $subscription || ! $subscription->valid()) {
+            return false;
+        }
+
+        foreach ((array) $prices as $price) {
+            if ($subscription->hasPrice($price)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the billable entity is subscribed to the given product(s).
+     *
+     * @param  string|array<int, string>  $products
+     */
+    public function subscribedToProduct(string|array $products, string $type = 'default'): bool
+    {
+        $subscription = $this->subscription($type);
+
+        if (! $subscription || ! $subscription->valid()) {
+            return false;
+        }
+
+        foreach ((array) $products as $product) {
+            if ($subscription->hasProduct($product)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the billable entity is on trial for the given type (optionally a price).
+     */
+    public function onTrial(string $type = 'default', ?string $price = null): bool
+    {
+        if (func_num_args() === 0 && $this->onGenericTrial()) {
+            return true;
+        }
+
+        $subscription = $this->subscription($type);
+
+        if (! $subscription || ! $subscription->onTrial()) {
+            return false;
+        }
+
+        return $price ? $subscription->hasPrice($price) : true;
     }
 
     /**
@@ -62,11 +116,23 @@ trait Billable
     }
 
     /**
-     * Create a new subscription.
+     * Check if the billable entity has an incomplete payment for the given type.
      */
-    public function newSubscription(string $name, string $plan): SubscriptionBuilder
+    public function hasIncompletePayment(string $type = 'default'): bool
     {
-        return new SubscriptionBuilder($this, $name, $plan);
+        $subscription = $this->subscription($type);
+
+        return $subscription ? $subscription->hasIncompletePayment() : false;
+    }
+
+    /**
+     * Create a new subscription.
+     *
+     * @param  string|array<int, string>  $prices
+     */
+    public function newSubscription(string $type, string|array $prices = []): SubscriptionBuilder
+    {
+        return new SubscriptionBuilder($this, $type, $prices);
     }
 
     /**
@@ -178,7 +244,7 @@ trait Billable
     /**
      * Refund a transaction.
      */
-    public function refund(string $transactionId, int $amount): Http\Response
+    public function refund(string $transactionId, int $amount): Response
     {
         $client = $this->pelecardClient();
         $response = $client->refund($transactionId, $amount);
@@ -195,28 +261,28 @@ trait Billable
     {
         $this->forceFill([
             'pelecard_token' => $token,
-            'card_brand' => $cardDetails['brand'] ?? null,
-            'card_last_four' => $cardDetails['last_four'] ?? null,
-            'card_exp_month' => $cardDetails['exp_month'] ?? null,
-            'card_exp_year' => $cardDetails['exp_year'] ?? null,
+            'pm_type' => $cardDetails['brand'] ?? null,
+            'pm_last_four' => $cardDetails['last_four'] ?? null,
+            'pm_exp_month' => $cardDetails['exp_month'] ?? null,
+            'pm_exp_year' => $cardDetails['exp_year'] ?? null,
         ])->save();
 
-        event(new \Yousefkadah\Pelecard\Events\CardSaved($this, $token, $cardDetails));
+        event(new CardSaved($this, $token, $cardDetails));
     }
 
     /**
      * Update the default payment method from a payment response.
      * Automatically extracts token and card details from the response.
      */
-    public function updateDefaultPaymentMethodFromResponse(\Yousefkadah\Pelecard\Http\Response $response): bool
+    public function updateDefaultPaymentMethodFromResponse(Response $response): bool
     {
-        $token = \Yousefkadah\Pelecard\Helpers\TokenExtractor::extractToken($response);
+        $token = TokenExtractor::extractToken($response);
 
         if (! $token) {
             return false;
         }
 
-        $cardDetails = \Yousefkadah\Pelecard\Helpers\TokenExtractor::extractCardDetails($response);
+        $cardDetails = TokenExtractor::extractCardDetails($response);
         $this->updateDefaultPaymentMethod($token, $cardDetails);
 
         return true;
@@ -231,11 +297,13 @@ trait Billable
             return null;
         }
 
-        // In a real implementation, you'd retrieve the token from a secure storage
-        // For now, we'll return a basic PaymentMethod object
         return new PaymentMethod([
+            'token' => $this->pelecard_token,
             'type' => $this->pm_type,
             'last_four' => $this->pm_last_four,
+            'brand' => $this->pm_type,
+            'expiry_month' => $this->pm_exp_month,
+            'expiry_year' => $this->pm_exp_year,
         ]);
     }
 
@@ -244,7 +312,7 @@ trait Billable
      */
     public function hasDefaultPaymentMethod(): bool
     {
-        return ! is_null($this->pm_type);
+        return ! is_null($this->pelecard_token);
     }
 
     /**
@@ -253,8 +321,11 @@ trait Billable
     public function deletePaymentMethod(): void
     {
         $this->forceFill([
+            'pelecard_token' => null,
             'pm_type' => null,
             'pm_last_four' => null,
+            'pm_exp_month' => null,
+            'pm_exp_year' => null,
         ])->save();
     }
 
@@ -289,7 +360,7 @@ trait Billable
     /**
      * Log a transaction for this billable entity.
      */
-    protected function logTransaction(string $type, Http\Response $response): void
+    protected function logTransaction(string $type, Response $response): void
     {
         if (! $response->successful()) {
             return;

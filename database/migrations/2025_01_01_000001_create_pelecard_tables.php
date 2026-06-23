@@ -15,8 +15,11 @@ return new class extends Migration
         if (! Schema::hasColumn('users', 'pelecard_id')) {
             Schema::table('users', function (Blueprint $table) {
                 $table->string('pelecard_id')->nullable()->index();
-                $table->string('pm_type')->nullable(); // payment method type
+                $table->string('pelecard_token')->nullable(); // default payment method (card token)
+                $table->string('pm_type')->nullable(); // card brand, e.g. "visa"
                 $table->string('pm_last_four', 4)->nullable(); // last 4 digits
+                $table->string('pm_exp_month', 2)->nullable();
+                $table->string('pm_exp_year', 4)->nullable();
                 $table->timestamp('trial_ends_at')->nullable();
             });
         }
@@ -39,26 +42,28 @@ return new class extends Migration
         Schema::create('subscriptions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->string('name'); // subscription name (e.g., 'default', 'premium')
+            $table->string('type'); // subscription type (e.g., 'default', 'premium')
             $table->string('pelecard_subscription_id')->nullable();
-            $table->string('pelecard_plan'); // plan identifier
-            $table->integer('quantity')->default(1);
+            $table->string('pelecard_status')->nullable(); // active, trialing, canceled, past_due, incomplete
+            $table->string('pelecard_price')->nullable(); // price identifier (null for multi-price subscriptions)
+            $table->integer('quantity')->nullable()->default(1);
             $table->timestamp('trial_ends_at')->nullable();
             $table->timestamp('ends_at')->nullable(); // cancellation date
             $table->timestamps();
 
-            $table->index(['user_id', 'name']);
+            $table->index(['user_id', 'type']);
         });
 
         // Create subscription_items table
         Schema::create('subscription_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('subscription_id')->constrained()->cascadeOnDelete();
-            $table->string('pelecard_plan'); // plan identifier
+            $table->string('pelecard_product')->nullable(); // product identifier
+            $table->string('pelecard_price'); // price identifier
             $table->integer('quantity')->default(1);
             $table->timestamps();
 
-            $table->unique(['subscription_id', 'pelecard_plan']);
+            $table->unique(['subscription_id', 'pelecard_price']);
         });
 
         // Create pelecard_transactions table for logging
@@ -90,12 +95,23 @@ return new class extends Migration
 
         if (Schema::hasColumn('users', 'pelecard_id')) {
             Schema::table('users', function (Blueprint $table) {
-                $table->dropColumn([
+                // Drop the index before the column it references; otherwise
+                // SQLite (and stricter drivers) error on the dangling index.
+                $table->dropIndex(['pelecard_id']);
+
+                // Drop only columns that still exist — the companion alignment
+                // migration may already have removed some of them on rollback.
+                $columns = array_filter([
                     'pelecard_id',
+                    'pelecard_token',
                     'pm_type',
                     'pm_last_four',
+                    'pm_exp_month',
+                    'pm_exp_year',
                     'trial_ends_at',
-                ]);
+                ], fn (string $column): bool => Schema::hasColumn('users', $column));
+
+                $table->dropColumn($columns);
             });
         }
     }

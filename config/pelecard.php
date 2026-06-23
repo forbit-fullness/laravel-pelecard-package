@@ -69,13 +69,18 @@ return [
     | Gateway URLs
     |--------------------------------------------------------------------------
     |
-    | API endpoints for different Pelecard environments.
+    | Pelecard host roots. The client appends the endpoint family per call:
+    | transaction services live under /services/<Name> and a few utility calls
+    | (GetTransaction, ValidateByUniqueKey, init) under /PaymentGW/<Name>.
+    | gateway20 and gateway21 are equivalent production hosts; there is no
+    | separate sandbox host — Pelecard issues test-terminal credentials against
+    | the same host.
     |
     */
 
     'gateway_urls' => [
-        'sandbox' => 'https://gateway20.pelecard.biz/services',
-        'production' => 'https://gateway21.pelecard.biz/services',
+        'sandbox' => 'https://gateway20.pelecard.biz',
+        'production' => 'https://gateway21.pelecard.biz',
     ],
 
     /*
@@ -88,6 +93,25 @@ return [
     */
 
     'currency' => env('PELECARD_CURRENCY', 'ILS'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Currency Codes
+    |--------------------------------------------------------------------------
+    |
+    | Pelecard expects the currency as a numeric code, not an ISO letter code.
+    | The string currency above is converted to its numeric code via this map
+    | before being sent to the API. ILS => 1 is confirmed by Pelecard; verify
+    | the foreign-currency codes against your terminal before relying on them.
+    |
+    */
+
+    'currency_codes' => [
+        'ILS' => 1,
+        'USD' => 2,
+        'EUR' => 978,
+        'GBP' => 826,
+    ],
 
     /*
     |--------------------------------------------------------------------------

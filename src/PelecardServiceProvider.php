@@ -16,7 +16,7 @@ class PelecardServiceProvider extends ServiceProvider
             'pelecard'
         );
 
-        $this->app->singleton(PelecardClient::class, fn ($app): \Yousefkadah\Pelecard\PelecardClient => new PelecardClient(
+        $this->app->singleton(PelecardClient::class, fn ($app): PelecardClient => new PelecardClient(
             terminal: config('pelecard.terminal'),
             user: config('pelecard.user'),
             password: config('pelecard.password'),

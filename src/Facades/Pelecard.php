@@ -3,6 +3,7 @@
 namespace Yousefkadah\Pelecard\Facades;
 
 use Illuminate\Support\Facades\Facade;
+use Yousefkadah\Pelecard\PelecardClient;
 
 /**
  * @method static \Yousefkadah\Pelecard\Http\Response authorize(array $data)
@@ -30,7 +31,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \Yousefkadah\Pelecard\Http\Response authorizePaymentsType(array $data)
  * @method static \Yousefkadah\Pelecard\PelecardClient for(mixed $billable)
  *
- * @see \Yousefkadah\Pelecard\PelecardClient
+ * @see PelecardClient
  */
 class Pelecard extends Facade
 {

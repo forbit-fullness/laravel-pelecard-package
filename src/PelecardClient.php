@@ -114,79 +114,88 @@ class PelecardClient
     }
 
     /**
-     * Refund a transaction.
+     * Refund (reverse) a captured transaction.
+     *
+     * Uses the ReverseTransaction service with the original transaction id
+     * (debitTrxId) and the amount to credit (NewAmount, in agorot). Must run
+     * against the same terminal that owns the original debit.
      */
     public function refund(string $transactionId, int $amount, ?string $currency = null): Response
     {
         $data = array_merge([
             'pelecard_transaction_id' => $transactionId,
-            'amount' => $amount,
+            'new_amount' => $amount,
             'currency' => $currency ?? config('pelecard.currency'),
         ], $this->getAuthData());
 
         $request = Request::make($data);
 
-        return $this->post('/CreditTransaction', $request->toPelecardFormat());
+        return $this->post('/ReverseTransaction', $request->toPelecardFormat());
     }
 
     /**
-     * Void/cancel an authorization.
+     * Void/reverse a transaction.
+     *
+     * Pelecard has no dedicated "VoidTransaction" service; a void is a full
+     * reversal via ReverseTransaction. For a same-day cancel see
+     * {@see cancelTransaction()}.
      */
-    public function void(string $transactionId): Response
+    public function void(string $transactionId, ?int $amount = null): Response
     {
-        $data = array_merge([
+        $data = array_merge(array_filter([
             'pelecard_transaction_id' => $transactionId,
-        ], $this->getAuthData());
+            'new_amount' => $amount,
+        ], fn ($value): bool => $value !== null), $this->getAuthData());
 
         $request = Request::make($data);
 
-        return $this->post('/VoidTransaction', $request->toPelecardFormat());
+        return $this->post('/ReverseTransaction', $request->toPelecardFormat());
     }
 
     /**
-     * Capture a pre-authorized amount.
+     * Capture funds previously held by a J5 authorization.
+     *
+     * Pelecard has no dedicated capture service: capturing is performed by
+     * charging the saved token/authorization with ActionType J4 via
+     * {@see chargeToken()} or {@see charge()}. Pass the token saved from the
+     * authorization response.
      */
-    public function capture(string $transactionId, int $amount): Response
+    public function capture(string $token, int $amount, ?string $currency = null): Response
     {
-        $data = array_merge([
-            'pelecard_transaction_id' => $transactionId,
-            'amount' => $amount,
-        ], $this->getAuthData());
-
-        $request = Request::make($data);
-
-        return $this->post('/CaptureTransaction', $request->toPelecardFormat());
+        return $this->chargeToken($token, $amount, $currency);
     }
 
     /**
-     * Get transaction status.
+     * Get a transaction by its Pelecard transaction id.
+     *
+     * Routed to the /PaymentGW/ surface (lowercase "terminal" + "TransactionId"),
+     * which is where transaction lookups live — not /services.
      */
     public function getTransactionStatus(string $transactionId): Response
     {
-        $data = array_merge([
-            'pelecard_transaction_id' => $transactionId,
-        ], $this->getAuthData());
-
-        $request = Request::make($data);
-
-        return $this->post('/GetTransactionStatus', $request->toPelecardFormat());
+        return $this->post('/PaymentGW/GetTransaction', array_merge(
+            $this->getPaymentGwAuthData(),
+            ['TransactionId' => $transactionId]
+        ));
     }
 
     /**
-     * Create a payment token for recurring payments.
+     * Tokenize a card.
+     *
+     * Server-to-server tokenization uses ConvertToToken; prefer
+     * {@see convertToToken()}. (There is no "CreateToken" service — in the
+     * hosted iframe, CreateToken is a boolean flag on /PaymentGW/init.)
      */
     public function createToken(array $cardData): Response
     {
-        $request = Request::make(array_merge($cardData, $this->getAuthData()))
-            ->setRequiredFields(['card_number', 'expiry_month', 'expiry_year']);
-
-        $request->validate();
-
-        return $this->post('/CreateToken', $request->toPelecardFormat());
+        return $this->convertToToken($cardData);
     }
 
     /**
-     * Charge using a token.
+     * Charge using a saved token.
+     *
+     * A tokenized charge is an ordinary debit (DebitRegularType) with the saved
+     * value in the "token" field instead of a card number.
      */
     public function chargeToken(string $token, int $amount, ?string $currency = null): Response
     {
@@ -198,7 +207,7 @@ class PelecardClient
 
         $request = Request::make($data);
 
-        return $this->post('/ChargeToken', $request->toPelecardFormat());
+        return $this->post('/DebitRegularType', $request->toPelecardFormat());
     }
 
     /**
@@ -323,17 +332,16 @@ class PelecardClient
     }
 
     /**
-     * Get transaction by unique ID.
+     * Get a transaction by its Pelecard transaction id.
+     *
+     * Routed to the /PaymentGW/ surface ({terminal, user, password, TransactionId}).
      */
-    public function getTransaction(string $uniqueId): Response
+    public function getTransaction(string $transactionId): Response
     {
-        $data = array_merge([
-            'unique_id' => $uniqueId,
-        ], $this->getAuthData());
-
-        $request = Request::make($data);
-
-        return $this->post('/GetTransaction', $request->toPelecardFormat());
+        return $this->post('/PaymentGW/GetTransaction', array_merge(
+            $this->getPaymentGwAuthData(),
+            ['TransactionId' => $transactionId]
+        ));
     }
 
     /**
@@ -584,7 +592,7 @@ class PelecardClient
 
         $request = Request::make($data);
 
-        return $this->post('/GetErrorMessage', $request->toPelecardFormat());
+        return $this->post('/GetErrorMessageHe', $request->toPelecardFormat());
     }
 
     /**
@@ -598,7 +606,7 @@ class PelecardClient
 
         $request = Request::make($data);
 
-        return $this->post('/GetErrorMessageEN', $request->toPelecardFormat());
+        return $this->post('/GetErrorMessageEn', $request->toPelecardFormat());
     }
 
     /**
@@ -1006,6 +1014,12 @@ class PelecardClient
      */
     protected function post(string $endpoint, array $data): Response
     {
+        // Transaction services live under /services/<Name>; a few utility calls
+        // (GetTransaction, ValidateByUniqueKey, init) live under /PaymentGW/<Name>.
+        if (! str_starts_with($endpoint, '/services/') && ! str_starts_with($endpoint, '/PaymentGW/')) {
+            $endpoint = '/services'.$endpoint;
+        }
+
         try {
             $this->logRequest($endpoint, $data);
 
@@ -1034,6 +1048,21 @@ class PelecardClient
      * Get authentication data for API requests.
      */
     protected function getAuthData(): array
+    {
+        return [
+            'terminal' => $this->terminal,
+            'user' => $this->user,
+            'password' => $this->password,
+        ];
+    }
+
+    /**
+     * Authentication data for the /PaymentGW/ surface, which (unlike /services)
+     * uses the lowercase "terminal" field and is sent without field mapping.
+     *
+     * @return array<string, string>
+     */
+    protected function getPaymentGwAuthData(): array
     {
         return [
             'terminal' => $this->terminal,
